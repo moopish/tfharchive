@@ -1,14 +1,17 @@
 ﻿using System.Collections.Immutable;
 using System.Text;
 
-namespace tfharchive.archive
+namespace tfharchive.archive.data
 {
     public class Palette : File
     {
-        public const string FileDirectory = "ART";
-        public const string FileExtention = "ACT";
+        public const int PaletteSize = 256;
+        public const int ByteSize = PaletteSize * 3;
 
-        private readonly ImmutableArray<int> _colours;
+        public const string FileDirectory = "ART";
+        public const string FileExtension = "ACT";
+
+        private readonly int[] _colours;
 
         /// <summary>
         /// Initialize a palette with the given filename and raw data.
@@ -17,20 +20,20 @@ namespace tfharchive.archive
         /// <param name="data">The raw byte data of the palette (must be exactly 768 bytes).</param>
         public Palette(string filename, byte[] data) : base(filename)
         {
-            if (data == null || data.Length != 768)
+            if (data == null || data.Length != ByteSize)
             {
                 throw new ArgumentException("Palette data must be exactly 768 bytes.", nameof(data));
             }
 
-            var colours = new int[256];
-            for (int i = 0; i < 256; i++)
+            var colours = new int[PaletteSize];
+            for (int i = 0; i < PaletteSize; i++)
             {
                 int r = data[i * 3];
                 int g = data[i * 3 + 1];
                 int b = data[i * 3 + 2];
-                colours[i] = (r << 16) | (g << 8) | b;
+                colours[i] = r << 16 | g << 8 | b;
             }
-            _colours = ImmutableArray.Create(colours);
+            _colours = colours;
         }
 
         public override string Directory => FileDirectory;
@@ -38,19 +41,21 @@ namespace tfharchive.archive
         /// <summary>
         /// The colours stored in the palette.
         /// </summary>
-        public ImmutableArray<int> Colours => _colours;
+        public ReadOnlySpan<int> Colours => _colours;
 
-        public override string Extension => FileExtention;
+        public override string Extension => FileExtension;
+
+        public override FileType FileType => FileType.Palette;
 
         public override byte[] AsBytes()
         {
-            byte[] bytes = new byte[_colours.Length * 3];
+            byte[] bytes = new byte[ByteSize];
 
-            for (int i = 0; i < _colours.Length; ++i)
+            for (int i = 0; i < PaletteSize; ++i)
             {
                 int colour = _colours[i];
-                bytes[i * 3] = (byte)((colour >> 16) & 0xFF); // red
-                bytes[i * 3 + 1] = (byte)((colour >> 8) & 0xFF); // green
+                bytes[i * 3] = (byte)(colour >> 16 & 0xFF); // red
+                bytes[i * 3 + 1] = (byte)(colour >> 8 & 0xFF); // green
                 bytes[i * 3 + 2] = (byte)(colour & 0xFF); // blue
             }
 
@@ -67,8 +72,8 @@ namespace tfharchive.archive
             for (int i = 0; i < _colours.Length; i++)
             {
                 int color = _colours[i];
-                int r = (color >> 16) & 0xFF;
-                int g = (color >> 8) & 0xFF;
+                int r = color >> 16 & 0xFF;
+                int g = color >> 8 & 0xFF;
                 int b = color & 0xFF;
                 sb.Append($"({r},{g},{b})");
                 if (i < _colours.Length - 1) sb.Append(',');

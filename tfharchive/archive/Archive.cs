@@ -1,15 +1,21 @@
 ﻿using System.Collections.Immutable;
 using System.Text;
-using System.Xml.Linq;
+using tfharchive.archive.data;
 
 namespace tfharchive.archive
 {
     public class Archive
     {
+        private const char NullCharacter = '\0';
+        private const char DirectoryDelimitor = '\\';
+        private const int DescriptionHeaderLength = 80;
+        private const int FileNameLength = 32;
+        private const int FileEntryLength = FileNameLength + 4 + 4;
+
         private readonly long _archiveSize;
         private readonly string _description;
         private readonly string _filepath;
-        private readonly List<(string directory, string name, string extra, int size, int offset)> _files;
+        private readonly ArchiveEntry[] _files;
 
         /// <summary>
         /// Private constructor to enforce loading via static Load method
@@ -18,7 +24,7 @@ namespace tfharchive.archive
         /// <param name="files">The file listing.</param>
         /// <param name="filepath">The path to the file archive for later access.</param>
         /// <param name="archiveSize">The size of the archive in bytes for validation.</param>
-        private Archive(string description, List<(string, string, string, int, int)> files, string filepath, long archiveSize)
+        private Archive(string description, ArchiveEntry[] files, string filepath, long archiveSize)
         {
             _description = description;
             _files = files;
@@ -35,20 +41,23 @@ namespace tfharchive.archive
         /// <summary>
         /// Get the number of files in the Archive.
         /// </summary>
-        public int FileCount => _files.Count;
+        public int FileCount => _files.Length;
 
         /// <summary>
         /// Check if a given file name exists in the archive.
         /// </summary>
         /// <param name="filename">The file name to check for.</param>
         /// <returns>True if it exists, false otherwise.</returns>
-        public bool Contains(string filename) => _files.Any(f => string.Equals(f.name, filename, StringComparison.OrdinalIgnoreCase));
+        public bool Contains(string filename) => _files.Any(f => string.Equals(f.Name, filename, StringComparison.OrdinalIgnoreCase));
+
+        public IEnumerable<ArchiveEntry> Entries => _files;
+
 
         /// <summary>
         /// Get the names of the files that are in the archive sorted alphabetically.
         /// </summary>
         /// <returns>A list of the file names.</returns>
-        public ImmutableList<string> FileNames() => [.. _files.Select(static f => f.name).OrderBy(static name => name)];
+        public ImmutableList<string> FileNames() => [.. _files.Select(static f => f.Name).OrderBy(static name => name)];
 
         /// <summary>
         /// Gets all the images from the archive
@@ -60,13 +69,13 @@ namespace tfharchive.archive
             var images = new List<Image>();
             foreach ((string directory, string name, string extra, int size, int offset) in _files)
             {
-                if (name != null && name.EndsWith($".{Image.FileExtention}", StringComparison.OrdinalIgnoreCase)
+                if (name != null && name.EndsWith($".{Image.FileExtension}", StringComparison.OrdinalIgnoreCase)
                     && directory == Image.FileDirectory && IsValidEntry(offset, size))
                 {
                     stream.Seek(offset, SeekOrigin.Begin);
                     byte[] data = new byte[size];
                     stream.ReadExactly(data, 0, size);
-                    images.Add(new Image(name, data));
+                    images.Add(new Image(name, extra, data));
                 }
             }
             return images;
@@ -83,14 +92,14 @@ namespace tfharchive.archive
             var images = new List<Image>();
             foreach (var filename in filenames)
             {
-                var (directory, name, extra, size, offset) = _files.FirstOrDefault(f => string.Equals(f.name, filename, StringComparison.OrdinalIgnoreCase));
-                if (name != null && name.EndsWith($".{Image.FileExtention}", StringComparison.OrdinalIgnoreCase)
-                    && name.StartsWith($"{Image.FileDirectory}/", StringComparison.OrdinalIgnoreCase) && IsValidEntry(offset, size))
+                var (directory, name, extra, size, offset) = _files.FirstOrDefault(f => string.Equals(f.Name, filename, StringComparison.OrdinalIgnoreCase));
+                if (name != null && name.EndsWith($".{Image.FileExtension}", StringComparison.OrdinalIgnoreCase)
+                    && directory == Image.FileDirectory && IsValidEntry(offset, size))
                 {
                     stream.Seek(offset, SeekOrigin.Begin);
                     byte[] data = new byte[size];
                     stream.ReadExactly(data, 0, size);
-                    images.Add(new Image(name, data));
+                    images.Add(new Image(name, extra, data));
                 }
             }
             return images;
@@ -107,9 +116,9 @@ namespace tfharchive.archive
             var palettes = new List<Palette>();
             foreach (var filename in filenames)
             {
-                var (directory, name, extra, size, offset) = _files.FirstOrDefault(f => string.Equals(f.name, filename, StringComparison.OrdinalIgnoreCase));
-                if (name != null && name.EndsWith($".{Palette.FileExtention}", StringComparison.OrdinalIgnoreCase)
-                    && name.StartsWith($"{Palette.FileDirectory}/", StringComparison.OrdinalIgnoreCase) && IsValidEntry(offset, size))
+                var (directory, name, extra, size, offset) = _files.FirstOrDefault(f => string.Equals(f.Name, filename, StringComparison.OrdinalIgnoreCase));
+                if (name != null && name.EndsWith($".{Palette.FileExtension}", StringComparison.OrdinalIgnoreCase)
+                    && directory == Palette.FileDirectory && IsValidEntry(offset, size))
                 {
                     stream.Seek(offset, SeekOrigin.Begin);
                     byte[] data = new byte[size];
@@ -151,39 +160,24 @@ namespace tfharchive.archive
             int fileCount = reader.ReadInt32();
                 
             // Read description (80 ASCII bytes, trim nulls)
-            byte[] descBytes = reader.ReadBytes(80);
-            string description = Encoding.ASCII.GetString(descBytes).TrimEnd('\0');
+            byte[] descBytes = reader.ReadBytes(DescriptionHeaderLength);
+            string description = Encoding.ASCII.GetString(descBytes).TrimEnd(NullCharacter);
 
             // Read file entries
-            var files = new List<(string directory, string name, string extra, int size, int offset)>(fileCount);
+            var files = new List<ArchiveEntry>(fileCount);
             for (int i = 0; i < fileCount; i++)
             {
-                byte[] nameBytes = reader.ReadBytes(32);
-                string name = Encoding.ASCII.GetString(nameBytes).TrimEnd('\0');
-                string directory = name[..name.IndexOf('\\')];
-                name = name[(name.IndexOf('\\') + 1)..];
-
-                string extra = "";
-
-                if (name.Contains('\0'))
-                {
-                    extra = name[(name.IndexOf('\0') + 1)..];
-                    name = name[..name.IndexOf('\0')];
-                }
-
-                int size = reader.ReadInt32();
-                int offset = reader.ReadInt32();
-                files.Add((directory, name, extra, size, offset));
+                files.Add(ArchiveEntry.Parse(reader.ReadBytes(ArchiveEntry.FileEntryLength)));
             }
 
             // Validate that offsets point within the data section
-            int expectedMinOffset = 4 + 80 + (fileCount * (32 + 4 + 4)); // Header + desc + entries
-            if (files.Any(f => f.offset < expectedMinOffset || f.offset + f.size > archiveSize))
+            int expectedMinOffset = 4 + DescriptionHeaderLength + (fileCount * FileEntryLength); // Header + desc + entries
+            if (files.Any(f => f.Offset < expectedMinOffset || f.Offset + f.Size > archiveSize))
             {
                 throw new InvalidDataException("Invalid file offset or size in archive.");
             }
 
-            return new Archive(description, files, filepath, archiveSize);
+            return new Archive(description, [.. files], filepath, archiveSize);
         }
     }
 }

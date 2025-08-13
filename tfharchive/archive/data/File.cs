@@ -1,5 +1,4 @@
-﻿
-namespace tfharchive.archive
+﻿namespace tfharchive.archive.data
 {
     /// <summary>
     /// Set up a file with the given name.
@@ -16,6 +15,11 @@ namespace tfharchive.archive
         /// The extension of the file.
         /// </summary>
         public abstract string Extension { get; }
+
+        /// <summary>
+        /// The file type of the class.
+        /// </summary>
+        public virtual FileType FileType => FileType.Unknown;
 
         /// <summary>
         /// The name of the file.

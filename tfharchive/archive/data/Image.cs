@@ -1,13 +1,14 @@
 ﻿using System.Text;
 
-namespace tfharchive.archive
+namespace tfharchive.archive.data
 {
     public class Image : File
     {
         public const string FileDirectory = "ART";
-        public const string FileExtention = "RAW";
+        public const string FileExtension = "RAW";
 
-        private readonly byte[,] _pixels;
+        private readonly byte[] _pixels;
+        private readonly string _palette;
         private readonly int _width;
         private readonly int _height;
 
@@ -16,7 +17,7 @@ namespace tfharchive.archive
         /// </summary>
         /// <param name="filename">The name of the file.</param>
         /// <param name="data">The raw byte data of the image.</param>
-        public Image(string filename, byte[] data) : base(filename)
+        public Image(string filename, string palette, byte[] data) : base(filename)
         {
             if (data == null || data.Length == 0)
             {
@@ -33,34 +34,19 @@ namespace tfharchive.archive
                 throw new ArgumentException($"Data length {length} does not match dimensions {_width}x{_height}.", nameof(data));
             }
 
-            // Store pixels in a 2D array (row-major)
-            _pixels = new byte[_height, _width];
-            for (int y = 0; y < _height; y++)
-            {
-                for (int x = 0; x < _width; x++)
-                {
-                    _pixels[y, x] = data[(y * _width) + x];
-                }
-            }
+            _pixels = (byte[])data.Clone();
+            _palette = palette;
         }
 
         public override string Directory => FileDirectory;
 
-        public override string Extension => FileExtention;
+        public override string Extension => FileExtension;
+
+        public override FileType FileType => FileType.Image;
 
         public override byte[] AsBytes()
         {
-            byte[] bytes = new byte[_width * _height];
-
-            for (int y = 0; y < _height; ++y)
-            {
-                for (int x = 0;  x < _width; ++x)
-                {
-                    bytes[y * _width + x] = _pixels[y, x];
-                }
-            }
-
-            return bytes;
+            return (byte[])_pixels.Clone();
         }
 
         /// <summary>
@@ -69,13 +55,13 @@ namespace tfharchive.archive
         /// <param name="x">The column of the pixel.</param>
         /// <param name="y">The row of the pixel.</param>
         /// <returns>The pixel (the index used with the palette to get the colour).</returns>
-        public int PixelAt(int x, int y)
+        public byte PixelAt(int x, int y)
         {
             if (x < 0 || x >= _width || y < 0 || y >= _height)
             {
                 throw new ArgumentOutOfRangeException($"Pixel coordinates ({x}, {y}) are out of bounds for image size {_width}x{_height}.");
             }
-            return _pixels[y, x];
+            return _pixels[y * _height + x];
         }
 
         /// <summary>
@@ -87,12 +73,12 @@ namespace tfharchive.archive
         private static (int, int) SizeToDimension(int size)
         {
             // TODO F3 and HB have stranger sizes
-            switch (size)
+            return size switch
             {
-                case 4096: return (64, 64);
-                case 65536: return (256, 256);
-                default: throw new ArgumentOutOfRangeException(nameof(size) + " -> " + size);
-           }
+                4096 => (64, 64),
+                65536 => (256, 256),
+                _ => throw new ArgumentOutOfRangeException(nameof(size) + " -> " + size),
+            };
         }
 
         /// <summary>
@@ -104,14 +90,7 @@ namespace tfharchive.archive
         public override string ToString()
         {
             var sb = new StringBuilder();
-            for (int y = 0; y < _height; y++)
-            {
-                for (int x = 0; x < _width; x++)
-                {
-                    if (sb.Length > 0) sb.Append(',');
-                    sb.Append(_pixels[y, x]);
-                }
-            }
+            sb.AppendJoin(',', _pixels);
             return sb.ToString();
         }
     }
