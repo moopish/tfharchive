@@ -1,6 +1,6 @@
 ﻿using System.Text;
 
-namespace tfharchive.archive.data
+namespace tfharchive.archive.data.art
 {
     public class Image : File
     {
