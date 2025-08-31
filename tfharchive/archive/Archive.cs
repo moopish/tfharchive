@@ -1,16 +1,16 @@
 ﻿using System.Collections.Immutable;
+using System.IO;
 using System.Text;
 using tfharchive.archive.data;
+using tfharchive.archive.data.art;
+using tfharchive.archive.data.startup;
 
 namespace tfharchive.archive
 {
     public class Archive
     {
         private const char NullCharacter = '\0';
-        private const char DirectoryDelimitor = '\\';
         private const int DescriptionHeaderLength = 80;
-        private const int FileNameLength = 32;
-        private const int FileEntryLength = FileNameLength + 4 + 4;
 
         private readonly long _archiveSize;
         private readonly string _description;
@@ -50,6 +50,27 @@ namespace tfharchive.archive
         /// <returns>True if it exists, false otherwise.</returns>
         public bool Contains(string filename) => _files.Any(f => string.Equals(f.Name, filename, StringComparison.OrdinalIgnoreCase));
 
+        public bool DumpRawFile(string filepath, string fileDirectory, string filename)
+        {
+            using var stream = new FileStream(_filepath, FileMode.Open, FileAccess.Read);
+            foreach ((string directory, string name, string extra, int size, int offset) in _files)
+            {
+                if (name == filename && directory == fileDirectory && IsValidEntry(offset, size))
+                {
+                    stream.Seek(offset, SeekOrigin.Begin);
+                    byte[] data = new byte[size];
+                    stream.ReadExactly(data, 0, size);
+                    System.IO.File.WriteAllBytes(filepath, data);
+                    stream.Close();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// The entries of the archive.
+        /// </summary>
         public IEnumerable<ArchiveEntry> Entries => _files;
 
 
@@ -79,6 +100,25 @@ namespace tfharchive.archive
                 }
             }
             return images;
+        }
+
+        public EndScreen? GetEndScreen(string filename)
+        {
+            using var stream = new FileStream(_filepath, FileMode.Open, FileAccess.Read);
+            EndScreen? endScreen = null;
+            foreach ((string directory, string name, string extra, int size, int offset) in _files)
+            {
+                if (name.Equals(filename, StringComparison.OrdinalIgnoreCase) && name.EndsWith($".{EndScreen.FileExtension}", StringComparison.OrdinalIgnoreCase)
+                    && directory == EndScreen.FileDirectory && IsValidEntry(offset, size))
+                {
+                    stream.Seek(offset, SeekOrigin.Begin);
+                    byte[] data = new byte[size];
+                    stream.ReadExactly(data, 0, size);
+                    endScreen = new EndScreen(name, data);
+                    break;
+                }
+            }
+            return endScreen;
         }
 
         /// <summary>
@@ -130,6 +170,27 @@ namespace tfharchive.archive
         }
 
         /// <summary>
+        /// TODO delete this, quick function for testing only
+        /// </summary>
+        /// <param name="directory"></param>
+        /// <param name="name"></param>
+        /// <returns></returns>
+        public TextFile GetRawFile(string directory, string name)
+        {
+            using var stream = new FileStream(_filepath, FileMode.Open, FileAccess.Read);
+            TextFile textFile = null;
+            var (eDirectory, eEame, extra, size, offset) = _files.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (name != null && directory == eDirectory && IsValidEntry(offset, size))
+                {
+                    stream.Seek(offset, SeekOrigin.Begin);
+                    byte[] data = new byte[size];
+                    stream.ReadExactly(data, 0, size);
+                    textFile = new TextFile(name, data);
+               }
+            return textFile;
+        }
+
+        /// <summary>
         /// Helper to validate entry extraction.
         /// </summary>
         /// <param name="offset">The entry's offset.</param>
@@ -171,7 +232,7 @@ namespace tfharchive.archive
             }
 
             // Validate that offsets point within the data section
-            int expectedMinOffset = 4 + DescriptionHeaderLength + (fileCount * FileEntryLength); // Header + desc + entries
+            int expectedMinOffset = 4 + DescriptionHeaderLength + (fileCount * ArchiveEntry.FileEntryLength); // Header + desc + entries
             if (files.Any(f => f.Offset < expectedMinOffset || f.Offset + f.Size > archiveSize))
             {
                 throw new InvalidDataException("Invalid file offset or size in archive.");
